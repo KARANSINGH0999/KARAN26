@@ -1,6 +1,5 @@
-
 import React from 'react';
-import DayCircle from './DayCircle.tsx';
+import DayCircle from './DayCircle';
 
 interface MonthSectionProps {
   id?: string;

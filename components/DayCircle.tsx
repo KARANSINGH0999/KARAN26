@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { DayProps } from '../types.ts';
+import { DayProps } from '../types';
 
 const DayCircle: React.FC<DayProps> = ({ index, isCompleted, note, onToggle, onSaveNote }) => {
   const [isNoteOpen, setIsNoteOpen] = useState(false);

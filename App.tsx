@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import MonthSection from './components/MonthSection.tsx';
-import StatsHeader from './components/StatsHeader.tsx';
-import JournalSection from './components/JournalSection.tsx';
-import MissionCard from './components/MissionCard.tsx';
-import { getValue, setValue } from './services/db.ts';
+import MonthSection from './components/MonthSection';
+import StatsHeader from './components/StatsHeader';
+import JournalSection from './components/JournalSection';
+import MissionCard from './components/MissionCard';
+import { getValue, setValue } from './services/db';
 
 const TOTAL_DAYS = 365;
 const TARGET_YEAR = 2026;
