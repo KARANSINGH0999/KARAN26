@@ -1,17 +1,18 @@
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import MonthSection from './components/MonthSection.tsx';
 import StatsHeader from './components/StatsHeader.tsx';
 import JournalSection from './components/JournalSection.tsx';
 import MissionCard from './components/MissionCard.tsx';
+import { getValue, setValue } from './services/db.ts';
 
 const TOTAL_DAYS = 365;
 const TARGET_YEAR = 2026;
-const STORAGE_KEY = 'karan26_progress';
-const NOTES_KEY = 'karan26_notes';
-const MISSION_KEY = 'karan26_mission';
-const LOG_KEY = 'karan26_activity_log';
+const KEY_PROGRESS = 'progress';
+const KEY_NOTES = 'notes';
+const KEY_MISSION = 'mission';
+const KEY_LOGS = 'logs';
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June", 
@@ -27,9 +28,10 @@ export default function App() {
   const [completedIndices, setCompletedIndices] = useState<number[]>([]);
   const [dayNotes, setDayNotes] = useState<Record<number, string>>({});
   const [yearlyMission, setYearlyMission] = useState<string>('');
-  const [aiMantra, setAiMantra] = useState<string>("SYSTEM READY. STANDING BY.");
+  const [aiMantra, setAiMantra] = useState<string>("SYSTEM INITIALIZED.");
   const [loadingMantra, setLoadingMantra] = useState<boolean>(false);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
   
   const todayIndex = useMemo(() => {
     const now = new Date();
@@ -39,36 +41,39 @@ export default function App() {
     return Math.floor(diff / oneDay) - 1;
   }, []);
 
+  // Initialize from IndexedDB
   useEffect(() => {
-    const savedProgress = localStorage.getItem(STORAGE_KEY);
-    const savedNotes = localStorage.getItem(NOTES_KEY);
-    const savedMission = localStorage.getItem(MISSION_KEY);
-    const savedLogs = localStorage.getItem(LOG_KEY);
-    
-    if (savedProgress) try { setCompletedIndices(JSON.parse(savedProgress)); } catch (e) {}
-    if (savedNotes) try { setDayNotes(JSON.parse(savedNotes)); } catch (e) {}
-    if (savedMission) setYearlyMission(savedMission);
-    if (savedLogs) try { setActivityLogs(JSON.parse(savedLogs)); } catch (e) {}
+    const loadData = async () => {
+      const progress = await getValue(KEY_PROGRESS) || [];
+      const notes = await getValue(KEY_NOTES) || {};
+      const mission = await getValue(KEY_MISSION) || '';
+      const logs = await getValue(KEY_LOGS) || [];
+      
+      setCompletedIndices(progress);
+      setDayNotes(notes);
+      setYearlyMission(mission);
+      setActivityLogs(logs);
+      setIsLoaded(true);
 
-    if (activeView === 'protocol') {
-      setTimeout(() => {
-        const currentMonth = MONTH_NAMES[new Date().getMonth()];
-        document.getElementById(`month-${currentMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 500);
-    }
+      if (activeView === 'protocol') {
+        setTimeout(() => {
+          const currentMonth = MONTH_NAMES[new Date().getMonth()];
+          document.getElementById(`month-${currentMonth}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 500);
+      }
+    };
+    loadData();
   }, [activeView]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(completedIndices));
-    localStorage.setItem(NOTES_KEY, JSON.stringify(dayNotes));
-    localStorage.setItem(MISSION_KEY, yearlyMission);
-    localStorage.setItem(LOG_KEY, JSON.stringify(activityLogs.slice(0, 10)));
-  }, [completedIndices, dayNotes, yearlyMission, activityLogs]);
-
-  const addLog = (msg: string) => {
+  const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setActivityLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 10));
-  };
+    const log = `[${time}] ${msg}`;
+    setActivityLogs(prev => {
+      const newLogs = [log, ...prev].slice(0, 10);
+      setValue(KEY_LOGS, newLogs);
+      return newLogs;
+    });
+  }, []);
 
   const fetchMantra = useCallback(async (currentStreak: number, totalDone: number) => {
     setLoadingMantra(true);
@@ -87,8 +92,8 @@ export default function App() {
   }, [yearlyMission]);
 
   useEffect(() => {
-    fetchMantra(streak, completedIndices.length);
-  }, [completedIndices.length % 5 === 0]);
+    if (isLoaded) fetchMantra(streak, completedIndices.length);
+  }, [completedIndices.length % 5 === 0, isLoaded]);
 
   const streak = useMemo(() => {
     if (completedIndices.length === 0) return 0;
@@ -119,19 +124,66 @@ export default function App() {
       const exists = prev.includes(index);
       addLog(exists ? `INDEX ${index + 1} DE-SYNCHRONIZED` : `INDEX ${index + 1} EXECUTED SUCCESS`);
       const newState = exists ? prev.filter(i => i !== index) : [...prev, index];
-      return newState.sort((a, b) => a - b);
+      const sorted = newState.sort((a, b) => a - b);
+      setValue(KEY_PROGRESS, sorted);
+      return sorted;
     });
-  }, []);
+  }, [addLog]);
 
   const handleSaveNote = useCallback((index: number, note: string) => {
     setDayNotes(prev => {
       const newNotes = { ...prev };
       if (note.trim() === '') delete newNotes[index];
       else newNotes[index] = note;
+      setValue(KEY_NOTES, newNotes);
       return newNotes;
     });
     if (note.trim() !== '' && !completedIndices.includes(index)) handleToggle(index);
   }, [completedIndices, handleToggle]);
+
+  const updateMission = (m: string) => {
+    setYearlyMission(m);
+    setValue(KEY_MISSION, m);
+    addLog("CORE MISSION PARAMETERS UPDATED.");
+  };
+
+  const exportDatabase = () => {
+    const data = {
+      progress: completedIndices,
+      notes: dayNotes,
+      mission: yearlyMission,
+      logs: activityLogs,
+      timestamp: new Date().toISOString(),
+      version: "1.0-DB"
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `karan26_backup_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+  };
+
+  const importDatabase = async (data: any) => {
+    if (data.progress) {
+      setCompletedIndices(data.progress);
+      await setValue(KEY_PROGRESS, data.progress);
+    }
+    if (data.notes) {
+      setDayNotes(data.notes);
+      await setValue(KEY_NOTES, data.notes);
+    }
+    if (data.mission) {
+      setYearlyMission(data.mission);
+      await setValue(KEY_MISSION, data.mission);
+    }
+    if (data.logs) {
+      setActivityLogs(data.logs);
+      await setValue(KEY_LOGS, data.logs);
+    }
+    addLog("DATABASE RESTORED FROM EXTERNAL SOURCE.");
+    window.location.reload();
+  };
 
   const monthsData = useMemo(() => {
     let currentIdx = 0;
@@ -143,6 +195,8 @@ export default function App() {
     });
   }, []);
 
+  if (!isLoaded) return <div className="min-h-screen bg-slate-50 flex items-center justify-center font-black text-blue-600 animate-pulse">SYNCHRONIZING DATABASE...</div>;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-600/20">
       <StatsHeader 
@@ -152,6 +206,8 @@ export default function App() {
         aiMantra={aiMantra}
         loadingMantra={loadingMantra}
         completedWeeksStatus={completedWeeksStatus}
+        exportData={exportDatabase}
+        onImport={importDatabase}
       />
 
       <main className="max-w-xl mx-auto px-6 pt-8 pb-40">
@@ -206,7 +262,7 @@ export default function App() {
                 <h2 className="text-4xl font-black tracking-tighter mb-2 text-slate-900">DIRECTIVE</h2>
                 <p className="text-slate-500 text-xs font-bold tracking-[0.2em] uppercase">Core Program Parameters</p>
              </header>
-             <MissionCard mission={yearlyMission} onSave={setYearlyMission} />
+             <MissionCard mission={yearlyMission} onSave={updateMission} />
              <div className="mt-12 bg-white p-6 rounded-3xl border border-blue-100 shadow-sm">
                 <h3 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] mb-4">Tactical Log</h3>
                 <div className="space-y-2 font-mono text-[10px]">
